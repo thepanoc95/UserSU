@@ -1,0 +1,219 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-android:
+    name: Build for Android (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: spoofed-su
+    strategy:
+      matrix:
+        include:
+          - target: aarch64-linux-android
+            arch: arm64-v8a
+          - target: armv7-linux-androideabi
+            arch: armeabi-v7a
+          - target: i686-linux-android
+            arch: x86
+          - target: x86_64-linux-android
+            arch: x86_64
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Setup Android NDK
+        uses: nttld/setup-ndk@v1
+        id: setup-ndk
+        with:
+          ndk-version: r25c
+          add-to-path: true
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('spoofed-su/**/Cargo.lock') }}
+
+      - name: Cache cargo index
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/git
+          key: ${{ runner.os }}-cargo-index-${{ hashFiles('spoofed-su/**/Cargo.lock') }}
+
+      - name: Cache target directory
+        uses: actions/cache@v4
+        with:
+          path: spoofed-su/target
+          key: ${{ runner.os }}-target-${{ matrix.target }}-${{ hashFiles('spoofed-su/**/Cargo.lock') }}
+
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk
+
+      - name: Build minsuki
+        env:
+          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+        run: |
+          cargo ndk -t ${{ matrix.arch }} build --release --bin minsuki
+
+      - name: Build envspoof
+        env:
+          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+        run: |
+          cargo ndk -t ${{ matrix.arch }} build --release --bin envspoof
+
+      - name: Build library
+        env:
+          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+        run: |
+          cargo ndk -t ${{ matrix.arch }} build --release --lib
+
+      - name: Package binaries
+        run: |
+          mkdir -p dist/${{ matrix.arch }}
+          cp target/${{ matrix.target }}/release/minsuki dist/${{ matrix.arch }}/
+          cp target/${{ matrix.target }}/release/envspoof dist/${{ matrix.arch }}/
+          cp target/${{ matrix.target }}/release/libminsuki.so dist/${{ matrix.arch }}/
+          
+          # Strip binaries to reduce size
+          $ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip dist/${{ matrix.arch }}/*
+          
+          # Create tarball
+          cd dist
+          tar -czf minsuki-${{ matrix.arch }}.tar.gz ${{ matrix.arch }}/
+          cd ..
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: minsuki-${{ matrix.arch }}
+          path: dist/minsuki-${{ matrix.arch }}.tar.gz
+
+  create-release:
+    name: Create Release
+    needs: build-android
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Display structure of downloaded files
+        run: ls -R artifacts
+
+      - name: Create checksums
+        run: |
+          cd artifacts
+          for dir in */; do
+            cd "$dir"
+            sha256sum *.tar.gz > checksums.txt
+            cd ..
+          done
+          cd ..
+
+      - name: Generate release notes
+        id: release_notes
+        run: |
+          cat > release_notes.md << 'EOF'
+          ## MinSuki Release ${{ github.ref_name }}
+          
+          A minimal SuperUser emulation layer for Android.
+          
+          ### Binaries Included
+          - `minsuki` - Main SuperUser emulation binary
+          - `envspoof` - Environment spoofer tool
+          - `libminsuki.so` - MinSuki library
+          
+          ### Supported Architectures
+          - **arm64-v8a** (aarch64) - Modern 64-bit ARM devices
+          - **armeabi-v7a** (armv7) - 32-bit ARM devices
+          - **x86_64** - 64-bit x86 emulators/devices
+          - **x86** - 32-bit x86 emulators/devices
+          
+          ### Installation
+          
+          1. Download the appropriate archive for your device architecture
+          2. Extract the archive: `tar -xzf minsuki-<arch>.tar.gz`
+          3. Push to device: `adb push <arch>/minsuki /data/local/tmp/`
+          4. Make executable: `adb shell chmod +x /data/local/tmp/minsuki`
+          5. Run: `adb shell /data/local/tmp/minsuki`
+          
+          ### Verification
+          
+          Check the `checksums.txt` file in each artifact to verify integrity:
+          ```bash
+          sha256sum -c checksums.txt
+          ```
+          
+          ### Notes
+          - All binaries are stripped for minimal size
+          - Built with Rust stable toolchain
+          - Android NDK r25c
+          
+          **Author:** Milo/OakyMac
+          EOF
+          
+          echo "notes_file=release_notes.md" >> $GITHUB_OUTPUT
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          body_path: ${{ steps.release_notes.outputs.notes_file }}
+          files: |
+            artifacts/minsuki-arm64-v8a/minsuki-arm64-v8a.tar.gz
+            artifacts/minsuki-arm64-v8a/checksums.txt
+            artifacts/minsuki-armeabi-v7a/minsuki-armeabi-v7a.tar.gz
+            artifacts/minsuki-armeabi-v7a/checksums.txt
+            artifacts/minsuki-x86_64/minsuki-x86_64.tar.gz
+            artifacts/minsuki-x86_64/checksums.txt
+            artifacts/minsuki-x86/minsuki-x86.tar.gz
+            artifacts/minsuki-x86/checksums.txt
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build-info:
+    name: Build Information
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Generate build info
+        run: |
+          echo "### Build Information" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Ref:** ${{ github.ref }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Author:** ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Rust Version:** stable" >> $GITHUB_STEP_SUMMARY
+          echo "- **NDK Version:** r25c" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Architectures" >> $GITHUB_STEP_SUMMARY
+          echo "- arm64-v8a (aarch64-linux-android)" >> $GITHUB_STEP_SUMMARY
+          echo "- armeabi-v7a (armv7-linux-androideabi)" >> $GITHUB_STEP_SUMMARY
+          echo "- x86_64 (x86_64-linux-android)" >> $GITHUB_STEP_SUMMARY
+          echo "- x86 (i686-linux-android)" >> $GITHUB_STEP_SUMMARY
