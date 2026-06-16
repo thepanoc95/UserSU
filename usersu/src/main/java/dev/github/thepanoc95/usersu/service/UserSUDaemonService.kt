@@ -4,6 +4,7 @@ import android.app.Service
 import android.content.Intent
 import android.os.IBinder
 import dev.github.thepanoc95.usersu.IUserSU
+
 import dev.github.thepanoc95.usersu.service.IUserSUDaemonService
 
 class UserSUDaemonService : Service() {
@@ -20,7 +21,7 @@ class UserSUDaemonService : Service() {
     }
 
     private val binder = object : IUserSUDaemonService.Stub() {
-        override fun registerServer(server: IBinder?) {
+        override fun registerServer(server: IBinder) {
             if (server != null) {
                 daemonBinder = IUserSU.Stub.asInterface(server)
                 println("[UserSU Service] Daemon binder registered successfully.")

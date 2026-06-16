@@ -373,7 +373,7 @@ class MainActivity : Activity() {
     }
 
     private fun extractAssets() {
-        val assetsList = listOf("proot", "psu", "psudo", "libusersuhook.so", "su", "usersu-server.dex", "start.sh")
+        val assetsList = listOf("proot", "psu", "psudo", "libusersuhook.so", "su", "usersu-server.dex", "start.sh", "startkernel.sh")
         val filesDir = filesDir
         val binDir = java.io.File(filesDir, "bin").apply { mkdirs() }
         val libDir = java.io.File(filesDir, "lib").apply { mkdirs() }

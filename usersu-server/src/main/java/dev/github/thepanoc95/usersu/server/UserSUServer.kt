@@ -8,7 +8,6 @@ import android.os.Looper
 import android.os.ParcelFileDescriptor
 import android.os.Process
 import dev.github.thepanoc95.usersu.IUserSU
-import android.app.IServiceConnection
 import java.io.File
 import java.io.InputStream
 import java.io.OutputStream
@@ -23,12 +22,13 @@ class UserSUServer : IUserSU.Stub() {
     private val localBin = File("/data/local/tmp/usersu/bin")
     private val localLib = File("/data/local/tmp/usersu/lib")
 
+    private val shell = ShellSession.get()
+
     init {
         localBin.mkdirs()
         localLib.mkdirs()
         branchesDir.mkdirs()
 
-        // Sync binaries from app's private files
         copyDaemonBinaries()
 
         val mainBranch = File(branchesDir, "main")
@@ -42,7 +42,7 @@ class UserSUServer : IUserSU.Stub() {
     }
 
     private fun copyDaemonBinaries() {
-        val binFiles = listOf("proot", "psu", "psudo", "su", "start.sh")
+        val binFiles = listOf("proot", "psu", "psudo", "su", "start.sh", "startkernel.sh")
         for (f in binFiles) {
             val src = File(appFilesBin, f)
             val dst = File(localBin, f)
@@ -67,9 +67,9 @@ class UserSUServer : IUserSU.Stub() {
         }
     }
 
+    override fun getVersion(): Int = 2
 
-    override fun getVersion(): Int = 1
-
+    // ── Legacy: PRoot-sandboxed execution ──────────────────────────
     override fun executeCommand(
         command: String?,
         args: List<String>?,
@@ -80,9 +80,6 @@ class UserSUServer : IUserSU.Stub() {
         stderr: ParcelFileDescriptor?
     ): Int {
         val processBuilder = ProcessBuilder()
-        
-        // We run PRoot to sandbox the command
-        // proot -r /data/local/tmp/usersu/active -b /dev -b /proc -b /sys -0 <command> <args>
         val cmdList = mutableListOf(
             "/data/local/tmp/usersu/bin/proot",
             "-r", "/data/local/tmp/usersu/active",
@@ -91,83 +88,55 @@ class UserSUServer : IUserSU.Stub() {
             "-b", "/sys",
             "-0"
         )
-        if (command != null) {
-            cmdList.add(command)
-        }
-        if (args != null) {
-            cmdList.addAll(args)
-        }
-        
+        if (command != null) cmdList.add(command)
+        if (args != null) cmdList.addAll(args)
         processBuilder.command(cmdList)
-        if (workingDir != null) {
-            processBuilder.directory(File(workingDir))
-        }
+        if (workingDir != null) processBuilder.directory(File(workingDir))
         if (envs != null) {
             val environment = processBuilder.environment()
             for (env in envs) {
                 val parts = env.split("=", limit = 2)
-                if (parts.size == 2) {
-                    environment[parts[0]] = parts[1]
-                }
+                if (parts.size == 2) environment[parts[0]] = parts[1]
             }
         }
-
         try {
             val process = processBuilder.start()
-            
-            // Forward input/output streams asynchronously
             val stdinStream = stdin?.let { ParcelFileDescriptor.AutoCloseInputStream(it) }
             val stdoutStream = stdout?.let { ParcelFileDescriptor.AutoCloseOutputStream(it) }
             val stderrStream = stderr?.let { ParcelFileDescriptor.AutoCloseOutputStream(it) }
-
             val threads = mutableListOf<Thread>()
-
             if (stdinStream != null) {
                 val t = Thread {
                     try {
                         stdinStream.copyTo(process.outputStream)
                         process.outputStream.flush()
-                    } catch (e: Exception) {}
-                    finally {
-                        try { process.outputStream.close() } catch (e: Exception) {}
-                    }
+                    } catch (_: Exception) {}
+                    finally { try { process.outputStream.close() } catch (_: Exception) {} }
                 }
-                t.start()
-                threads.add(t)
+                t.start(); threads.add(t)
             }
-
             if (stdoutStream != null) {
                 val t = Thread {
                     try {
                         process.inputStream.copyTo(stdoutStream)
                         stdoutStream.flush()
-                    } catch (e: Exception) {}
-                    finally {
-                        try { stdoutStream.close() } catch (e: Exception) {}
-                    }
+                    } catch (_: Exception) {}
+                    finally { try { stdoutStream.close() } catch (_: Exception) {} }
                 }
-                t.start()
-                threads.add(t)
+                t.start(); threads.add(t)
             }
-
             if (stderrStream != null) {
                 val t = Thread {
                     try {
                         process.errorStream.copyTo(stderrStream)
                         stderrStream.flush()
-                    } catch (e: Exception) {}
-                    finally {
-                        try { stderrStream.close() } catch (e: Exception) {}
-                    }
+                    } catch (_: Exception) {}
+                    finally { try { stderrStream.close() } catch (_: Exception) {} }
                 }
-                t.start()
-                threads.add(t)
+                t.start(); threads.add(t)
             }
-
             val exitCode = process.waitFor()
-            for (t in threads) {
-                t.join(1000)
-            }
+            for (t in threads) t.join(1000)
             return exitCode
         } catch (e: Exception) {
             e.printStackTrace()
@@ -175,31 +144,77 @@ class UserSUServer : IUserSU.Stub() {
         }
     }
 
+    // ── Shizuku-style: direct process execution (no sandbox) ─────
+    override fun newProcess(
+        cmdline: List<String>?,
+        workingDir: String?,
+        envs: List<String>?,
+        stdin: ParcelFileDescriptor?,
+        stdout: ParcelFileDescriptor?,
+        stderr: ParcelFileDescriptor?
+    ): Int {
+        if (cmdline.isNullOrEmpty()) return -1
+        return shell.newProcess(cmdline, workingDir, envs, stdin, stdout, stderr)
+    }
+
+    override fun dispatchCommand(command: String?): String {
+        if (command.isNullOrEmpty()) return ""
+        return shell.dispatchCommand(command)
+    }
+
+    override fun shell(command: String?): String {
+        if (command.isNullOrEmpty()) return ""
+        return shell.shell(command)
+    }
+
+    // ── Custom su: runs startkernel.sh from the app dir ──────────
+    override fun setupKernel(): Int {
+        val kernelScript = File(appFilesBin, "startkernel.sh")
+        if (!kernelScript.exists()) {
+            System.err.println("[UserSU] startkernel.sh not found in ${appFilesBin.absolutePath}")
+            return -1
+        }
+        kernelScript.setExecutable(true)
+        return try {
+            val pb = ProcessBuilder(
+                "/system/bin/sh", "-c",
+                "export CLASSPATH=/data/data/dev.github.thepanoc95.usersu/files/bin/usersu-server.dex && ${kernelScript.absolutePath}"
+            )
+            pb.directory(appFilesBin)
+            pb.environment()["HOME"] = appFilesBin.absolutePath
+            pb.environment()["USER"] = "root"
+            val proc = pb.start()
+            val output = proc.inputStream.bufferedReader().readText()
+            val error = proc.errorStream.bufferedReader().readText()
+            val exit = proc.waitFor()
+            if (output.isNotEmpty()) println("[UserSU:kernel] $output")
+            if (error.isNotEmpty()) System.err.println("[UserSU:kernel:err] $error")
+            exit
+        } catch (e: Exception) {
+            e.printStackTrace()
+            -1
+        }
+    }
+
+    // ── Branch management ────────────────────────────────────────
     override fun createBranch(branchName: String?) {
         if (branchName.isNullOrEmpty()) return
         val newBranchDir = File(branchesDir, branchName)
         if (newBranchDir.exists()) return
         newBranchDir.mkdirs()
-        
-        // Mirror files from active branch
         val activeBranchDir = File(activeLink.canonicalPath)
         copyBranch(activeBranchDir, newBranchDir)
-        
-        // Initialize git repository inside if git is present
         try {
             runCommand(listOf("git", "init"), newBranchDir)
             runCommand(listOf("git", "add", "."), newBranchDir)
             runCommand(listOf("git", "commit", "-m", "Initial branch creation"), newBranchDir)
-        } catch (e: Exception) {
-            // Git not available, fallback to manual file copy
-        }
+        } catch (_: Exception) {}
     }
 
     override fun switchBranch(branchName: String?) {
         if (branchName.isNullOrEmpty()) return
         val targetBranchDir = File(branchesDir, branchName)
         if (!targetBranchDir.exists()) return
-        
         activeLink.delete()
         createSymlink(targetBranchDir.absolutePath, activeLink.absolutePath)
         activeBranch = branchName
@@ -215,21 +230,17 @@ class UserSUServer : IUserSU.Stub() {
         return branchesDir.list()?.toList() ?: listOf("main")
     }
 
-    override fun getActiveBranch(): String {
-        return activeBranch
-    }
+    override fun getActiveBranch(): String = activeBranch
 
     override fun rollbackActiveBranch() {
         val activeBranchDir = File(activeLink.canonicalPath)
         try {
-            // git reset --hard HEAD
             runCommand(listOf("git", "reset", "--hard", "HEAD"), activeBranchDir)
             runCommand(listOf("git", "clean", "-fd"), activeBranchDir)
-        } catch (e: Exception) {
-            // Git fallback or manual
-        }
+        } catch (_: Exception) {}
     }
 
+    // ── App wrapping ─────────────────────────────────────────────
     override fun setAppWrapped(packageName: String?, wrapped: Boolean) {
         if (packageName.isNullOrEmpty()) return
         val propName = "wrap.$packageName"
@@ -248,19 +259,13 @@ class UserSUServer : IUserSU.Stub() {
             val process = ProcessBuilder("getprop", propName).start()
             val output = process.inputStream.bufferedReader().readText().trim()
             output.contains("libusersuhook.so")
-        } catch (e: Exception) {
-            false
-        }
+        } catch (_: Exception) { false }
     }
 
+    // ── Private helpers ──────────────────────────────────────────
     private fun setupBranchFS(branchDir: File) {
-        // Create basic directories
         val dirs = listOf("bin", "sbin", "etc", "root", "home", "tmp", "usr/bin", "usr/sbin", "usr/lib", "var")
-        for (dir in dirs) {
-            File(branchDir, dir).mkdirs()
-        }
-        
-        // Mirror system bin symlinks
+        for (dir in dirs) File(branchDir, dir).mkdirs()
         val sysBin = File("/system/bin")
         val guestBin = File(branchDir, "bin")
         sysBin.listFiles()?.forEach { file ->
@@ -275,10 +280,8 @@ class UserSUServer : IUserSU.Stub() {
             val relPath = file.relativeTo(src).path
             if (relPath.isEmpty()) return@forEach
             val target = File(dst, relPath)
-            if (file.isDirectory) {
-                target.mkdirs()
-            } else {
-                // If it is a symlink, create a symlink with the same target
+            if (file.isDirectory) target.mkdirs()
+            else {
                 if (isSymlink(file)) {
                     val targetLink = readSymlink(file)
                     createSymlink(targetLink, target.absolutePath)
@@ -289,19 +292,19 @@ class UserSUServer : IUserSU.Stub() {
         }
     }
 
-    private fun isSymlink(file: File): Boolean {
-        return java.nio.file.Files.isSymbolicLink(file.toPath())
-    }
+    private fun isSymlink(file: File): Boolean =
+        java.nio.file.Files.isSymbolicLink(file.toPath())
 
-    private fun readSymlink(file: File): String {
-        return java.nio.file.Files.readSymbolicLink(file.toPath()).toString()
-    }
+    private fun readSymlink(file: File): String =
+        java.nio.file.Files.readSymbolicLink(file.toPath()).toString()
 
     private fun createSymlink(target: String, link: String) {
         try {
-            java.nio.file.Files.createSymbolicLink(java.nio.file.Paths.get(link), java.nio.file.Paths.get(target))
-        } catch (e: Exception) {
-            // Fallback via shell ln -s
+            java.nio.file.Files.createSymbolicLink(
+                java.nio.file.Paths.get(link),
+                java.nio.file.Paths.get(target)
+            )
+        } catch (_: Exception) {
             runCommand(listOf("ln", "-s", target, link), File("/"))
         }
     }
@@ -315,10 +318,8 @@ class UserSUServer : IUserSU.Stub() {
         fun main(args: Array<String>) {
             Looper.prepareMainLooper()
             val server = UserSUServer()
-            
-            println("[UserSU] Server daemon started, registering binder...")
-            
-            // Connect to Manager App's UserSUDaemonService
+            println("[UserSU] Server daemon v${server.getVersion()} started, registering binder...")
+
             val amClass = Class.forName("android.app.ActivityManager")
             val amsClass = Class.forName("android.app.IActivityManager\$Stub")
             val asInterface = amsClass.getMethod("asInterface", IBinder::class.java)
@@ -328,13 +329,35 @@ class UserSUServer : IUserSU.Stub() {
             val am = asInterface.invoke(null, amBinder)
 
             val intent = Intent().apply {
-                component = ComponentName("dev.github.thepanoc95.usersu", "dev.github.thepanoc95.usersu.service.UserSUDaemonService")
+                component = ComponentName(
+                    "dev.github.thepanoc95.usersu",
+                    "dev.github.thepanoc95.usersu.service.UserSUDaemonService"
+                )
             }
 
-            val connection = object : IServiceConnection.Stub() {
-                override fun connected(name: ComponentName?, service: IBinder?, dead: Boolean) {
+            // Manual Binder implementation of android.app.IServiceConnection
+            // (avoids AIDL compilation issues on different SDK/arch combos)
+            val connection = object : Binder() {
+                init {
+                    attachInterface(this, "android.app.IServiceConnection")
+                }
+
+                override fun onTransact(code: Int, data: Parcel, reply: Parcel?, flags: Int): Boolean {
+                    if (code == FIRST_CALL_TRANSACTION) {
+                        data.enforceInterface("android.app.IServiceConnection")
+                        val name: ComponentName? = if (data.readInt() != 0) {
+                            ComponentName.CREATOR.createFromParcel(data)
+                        } else null
+                        val service = data.readStrongBinder()
+                        val dead = data.readInt() != 0
+                        connected(name, service, dead)
+                        return true
+                    }
+                    return super.onTransact(code, data, reply, flags)
+                }
+
+                private fun connected(name: ComponentName?, service: IBinder?, dead: Boolean) {
                     println("[UserSU] Connected to UserSUDaemonService.")
-                    // Call registerServer(server) on the manager service
                     try {
                         val parcel = android.os.Parcel.obtain()
                         val reply = android.os.Parcel.obtain()
@@ -352,8 +375,9 @@ class UserSUServer : IUserSU.Stub() {
                 }
             }
 
-            val bindMethod = am.javaClass.methods.firstOrNull { it.name == "bindService" || it.name == "bindServiceInstance" }
-                ?: throw IllegalStateException("Could not find bindService method on ActivityManager")
+            val bindMethod = am.javaClass.methods.firstOrNull {
+                it.name == "bindService" || it.name == "bindServiceInstance"
+            } ?: throw IllegalStateException("Could not find bindService method on ActivityManager")
 
             val params = bindMethod.parameterTypes
             val bindArgs = arrayOfNulls<Any>(params.size)
@@ -362,12 +386,10 @@ class UserSUServer : IUserSU.Stub() {
                 when {
                     type.isAssignableFrom(Intent::class.java) -> bindArgs[i] = intent
                     type == String::class.java -> {
-                        if (i == 3) bindArgs[i] = null // resolvedType
-                        else bindArgs[i] = "shell" // callingPackage
+                        bindArgs[i] = if (i == 3) null else "shell"
                     }
                     type == Int::class.javaPrimitiveType -> {
-                        if (i == params.size - 1) bindArgs[i] = 0 // userId
-                        else bindArgs[i] = 1 // flags (BIND_AUTO_CREATE)
+                        bindArgs[i] = if (i == params.size - 1) 0 else 1
                     }
                     type == Long::class.javaPrimitiveType -> bindArgs[i] = 1L
                     type.name.contains("IApplicationThread") -> bindArgs[i] = null

@@ -44,6 +44,7 @@
             android-sdk
             kotlin
             jdk17
+            dart
           ] ++ crossCompilers;
 
           shellHook = ''
