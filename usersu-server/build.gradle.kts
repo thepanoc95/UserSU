@@ -1,3 +1,5 @@
+import sun.jvmstat.monitor.MonitoredVmUtil.commandLine
+
 plugins {
     alias(libs.plugins.android.library)
     alias(libs.plugins.kotlin.android)
@@ -30,6 +32,7 @@ dependencies {
 }
 
 // Task to run d8 tool and generate DEX for app_process
+
 tasks.register("dexJar") {
     dependsOn("assembleRelease")
     doLast {
@@ -46,7 +49,7 @@ tasks.register("dexJar") {
             throw GradleException("d8 tool not found at ${d8.absolutePath}")
         }
 
-        val classesJar = File(project.projectDir, "build/intermediates/aar_main_jar/release/classes.jar")
+        val classesJar = File(project.projectDir, "build/intermediates/aar_main_jar/release/syncReleaseLibJars/classes.jar")
         if (!classesJar.exists()) {
             throw GradleException("Compiled classes.jar not found at ${classesJar.absolutePath}")
         }
@@ -55,13 +58,12 @@ tasks.register("dexJar") {
         outputDir.deleteRecursively()
         outputDir.mkdirs()
 
-        project.exec {
-            commandLine(
-                d8.absolutePath,
-                "--output", outputDir.absolutePath,
-                classesJar.absolutePath
-            )
-        }
+        ProcessBuilder(
+            d8.absolutePath,
+            "--output",
+            outputDir.absolutePath,
+            classesJar.absolutePath
+        ).inheritIO().start().waitFor()
 
         val classesDex = File(outputDir, "classes.dex")
         val finalDex = File(project.projectDir, "build/outputs/usersu-server.dex")
