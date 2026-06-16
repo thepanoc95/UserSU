@@ -31,8 +31,14 @@ android {
     kotlinOptions {
         jvmTarget = "17"
     }
+<<<<<<< HEAD
     buildFeatures {
         aidl = false
+=======
+
+    buildFeatures {
+        aidl = true
+>>>>>>> 8bf0fd641d74359ff87d417a0ea4facfb798eac1
     }
 }
 

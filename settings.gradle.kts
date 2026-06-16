@@ -26,9 +26,9 @@ dependencyResolutionManagement {
             library("androidx-junit", "androidx.test.ext:junit:1.1.5")
             library("androidx-espresso-core", "androidx.test.espresso:espresso-core:3.5.1")
             
-            plugin("android-application", "com.android.application").version("8.2.2")
+            plugin("android-application", "com.android.application").version("8.8.2")
             plugin("kotlin-android", "org.jetbrains.kotlin.android").version("1.9.22")
-            plugin("android-library", "com.android.library").version("8.2.2")
+            plugin("android-library", "com.android.library").version("8.8.2")
         }
     }
 }
