@@ -31,14 +31,9 @@ android {
     kotlinOptions {
         jvmTarget = "17"
     }
-<<<<<<< HEAD
-    buildFeatures {
-        aidl = false
-=======
 
     buildFeatures {
         aidl = true
->>>>>>> 8bf0fd641d74359ff87d417a0ea4facfb798eac1
     }
 }
 
@@ -49,7 +44,6 @@ dependencies {
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
-    // Add dependency on usersu-server to access generated AIDL classes
     implementation(project(":usersu-server"))
 }
 

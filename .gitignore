@@ -368,3 +368,5 @@ dart/.pub/
 dart/build/
 dart/pubspec.lock
 dart/coverage/
+
+*KEYSTORE

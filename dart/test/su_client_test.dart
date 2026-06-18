@@ -22,4 +22,4 @@ void main() {
       expect(() => client.run([]), throwsA(isA<ProcessException>()));
     });
   });
-}
+

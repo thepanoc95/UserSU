@@ -7,7 +7,6 @@ import java.io.OutputStream
 
 class ShellSession {
 
-    /** Execute a command directly (Shizuku-style newProcess) */
     fun newProcess(
         cmdline: List<String>,
         workingDir: String?,
@@ -47,11 +46,8 @@ class ShellSession {
                 val t = Thread {
                     try {
                         ParcelFileDescriptor.AutoCloseOutputStream(stdout)
-                            .use { stdoutStream -> process.inputStream.copyTo(stdoutStream) }
-                        stdoutStream.flush()
+                            .use { s -> process.inputStream.copyTo(s) }
                     } catch (_: Exception) {
-                    } finally {
-                        try { stdoutStream.close() } catch (_: Exception) {}
                     }
                 }
                 t.start(); threads.add(t)
@@ -61,11 +57,8 @@ class ShellSession {
                 val t = Thread {
                     try {
                         ParcelFileDescriptor.AutoCloseOutputStream(stderr)
-                            .use { stderrStream -> process.errorStream.copyTo(stderrStream) }
-                        stderrStream.flush()
+                            .use { s -> process.errorStream.copyTo(s) }
                     } catch (_: Exception) {
-                    } finally {
-                        try { stderrStream.close() } catch (_: Exception) {}
                     }
                 }
                 t.start(); threads.add(t)
@@ -79,8 +72,7 @@ class ShellSession {
             -1
         }
     }
-
-    /** Execute and capture stdout as a string */
+ 
     fun dispatchCommand(command: String): String {
         return try {
             val parts = command.split("\\s+".toRegex())
@@ -94,7 +86,6 @@ class ShellSession {
         }
     }
 
-    /** Run a shell command and capture output */
     fun shell(command: String): String {
         return try {
             val pb = ProcessBuilder("/system/bin/sh", "-c", command)

@@ -16,6 +16,7 @@
         android-sdk = android-nixpkgs.sdk.${system} (sdkPkgs: with sdkPkgs; [
           cmdline-tools-latest
           build-tools-34-0-0
+          build-tools-35-0-0
           platform-tools
           platforms-android-34
           ndk-26-1-10909125
@@ -63,9 +64,24 @@
             export PATH=$JAVA_HOME/bin:$PATH
             export GRADLE_OPTS="-Dorg.gradle.daemon=false"
 
-            # Android environment
-            export ANDROID_HOME="${android-sdk}/share/android-sdk"
+            # Create writable SDK overlay so Gradle can install missing packages
+            export _NIX_SDK="${android-sdk}/share/android-sdk"
+            export ANDROID_HOME="$HOME/.android/sdk"
             export ANDROID_SDK_ROOT="$ANDROID_HOME"
+            if [ ! -d "$ANDROID_HOME" ]; then
+              mkdir -p "$ANDROID_HOME"
+              for _dir in platforms platform-tools licenses ndk cmdline-tools build-tools; do
+                if [ -d "$_NIX_SDK/$_dir" ]; then
+                  cp -r "$_NIX_SDK/$_dir" "$ANDROID_HOME/"
+                  chmod -R u+w "$ANDROID_HOME/$_dir"
+                fi
+              done
+              if [ -f "$_NIX_SDK/.knownPackages" ]; then
+                cp "$_NIX_SDK/.knownPackages" "$ANDROID_HOME/"
+                chmod u+w "$ANDROID_HOME/.knownPackages"
+              fi
+              echo "✓ Writable SDK overlay created at $ANDROID_HOME"
+            fi
 
             # Find NDK directory
             export ANDROID_NDK_ROOT="$ANDROID_HOME/ndk/26.1.10909125"

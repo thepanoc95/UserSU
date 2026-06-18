@@ -4,7 +4,9 @@ import android.content.ComponentName
 import android.content.Intent
 import android.os.Binder
 import android.os.IBinder
+import android.os.IInterface
 import android.os.Looper
+import android.os.Parcel
 import android.os.ParcelFileDescriptor
 import android.os.Process
 import dev.github.thepanoc95.usersu.IUserSU
@@ -61,6 +63,16 @@ class UserSUServer : IUserSU.Stub() {
             try {
                 srcHook.copyTo(dstHook, overwrite = true)
                 dstHook.setReadable(true, false)
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+        val srcDex = File(appFilesBin, "usersu-server.dex")
+        val dstDex = File(localBin, "usersu-server.dex")
+        if (srcDex.exists()) {
+            try {
+                srcDex.copyTo(dstDex, overwrite = true)
+                dstDex.setReadable(true, false)
             } catch (e: Exception) {
                 e.printStackTrace()
             }
@@ -339,7 +351,7 @@ class UserSUServer : IUserSU.Stub() {
             // (avoids AIDL compilation issues on different SDK/arch combos)
             val connection = object : Binder() {
                 init {
-                    attachInterface(this, "android.app.IServiceConnection")
+                    attachInterface(IInterface { this }, "android.app.IServiceConnection")
                 }
 
                 override fun onTransact(code: Int, data: Parcel, reply: Parcel?, flags: Int): Boolean {
