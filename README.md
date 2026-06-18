@@ -1,8 +1,8 @@
-# SpoofySu
+# UserSU
 
 <img width="100" height="100" alt="SpoofySu Logo" src="./usersu_logo.png" />
 
-A userland root environment spoofer for Android devices written in Rust.
+UserMode root solution for Android devices
 
 [![License: Unlicense](https://img.shields.io/badge/license-Unlicense-blue.svg)](http://unlicense.org/)
 [![Made with Rust](https://img.shields.io/badge/Made%20with-Rust-orange.svg)](https://www.rust-lang.org/)
@@ -83,13 +83,13 @@ Here's what it looks like when you use it:
 
 ```bash
 $ psu
-[*] Userland root environment active
-[!] boot.img not modified.
+[*] Current UID: $
+[!] UserSU is in constant development and is still a WIP project, most applications that use root privileges won't see UserSU's `psu` or `psudo`.
 
 root@android:~# whoami
 root
 root@android:~# pwd
-/sdcard/SpoofySu/root
+/root
 root@android:~# exit
 ```
 
@@ -127,7 +127,7 @@ You can add your own scripts to `bin/`, edit config files in `etc/`, basically t
 - Apps with kernel-level root checks (SafetyNet, banking apps, etc)
 - Anything that needs actual kernel privileges
 - Modifying the real system partition (by design!)
-- Magisk modules (though I'm working on compatibility)
+- Magisk modules (though I'm planning on compatibility)
 
 This isn't a replacement for actual root. It's more like a development/testing tool or for apps that only do basic root checks.
 
@@ -162,7 +162,7 @@ Bug reports and feature requests are welcome too.
 
 ## Community
 
-I set up a Telegram group for this and the OpenRoot project:
+I set up a Telegram channel for this project:
 [Join here](https://t.me/usersu_root)
 
 Feel free to ask questions or share what you're using it for!
