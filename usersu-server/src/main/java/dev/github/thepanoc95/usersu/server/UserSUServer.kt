@@ -80,8 +80,6 @@ class UserSUServer : IUserSU.Stub() {
     }
 
     override fun getVersion(): Int = 2
-
-    // ── Legacy: PRoot-sandboxed execution ──────────────────────────
     override fun executeCommand(
         command: String?,
         args: List<String>?,
@@ -156,7 +154,6 @@ class UserSUServer : IUserSU.Stub() {
         }
     }
 
-    // ── Shizuku-style: direct process execution (no sandbox) ─────
     override fun newProcess(
         cmdline: List<String>?,
         workingDir: String?,
@@ -179,7 +176,6 @@ class UserSUServer : IUserSU.Stub() {
         return shell.shell(command)
     }
 
-    // ── Custom su: runs startkernel.sh from the app dir ──────────
     override fun setupKernel(): Int {
         val kernelScript = File(appFilesBin, "startkernel.sh")
         if (!kernelScript.exists()) {
@@ -187,28 +183,42 @@ class UserSUServer : IUserSU.Stub() {
             return -1
         }
         kernelScript.setExecutable(true)
+
+        val kernel = dev.github.thepanoc95.usersu.backend.UsermodeKernel
+        if (!kernel.loadNative()) {
+            System.err.println("[UserSU] Failed to load native kernel library, falling back to script")
+            return try {
+                val pb = ProcessBuilder(
+                    "/system/bin/sh", "-c",
+                    "export CLASSPATH=/data/data/dev.github.thepanoc95.usersu/files/bin/usersu-server.dex && ${kernelScript.absolutePath}"
+                )
+                pb.directory(appFilesBin)
+                pb.environment()["HOME"] = appFilesBin.absolutePath
+                pb.environment()["USER"] = "root"
+                pb.environment()["KERNEL_CMDLINE"] = "init=/system/bin/sh root=/data ro"
+                val proc = pb.start()
+                val output = proc.inputStream.bufferedReader().readText()
+                val error = proc.errorStream.bufferedReader().readText()
+                val exit = proc.waitFor()
+                if (output.isNotEmpty()) println("[UserSU:kernel] $output")
+                if (error.isNotEmpty()) System.err.println("[UserSU:kernel:err] $error")
+                exit
+            } catch (e: Exception) {
+                e.printStackTrace()
+                -1
+            }
+        }
+
         return try {
-            val pb = ProcessBuilder(
-                "/system/bin/sh", "-c",
-                "export CLASSPATH=/data/data/dev.github.thepanoc95.usersu/files/bin/usersu-server.dex && ${kernelScript.absolutePath}"
-            )
-            pb.directory(appFilesBin)
-            pb.environment()["HOME"] = appFilesBin.absolutePath
-            pb.environment()["USER"] = "root"
-            val proc = pb.start()
-            val output = proc.inputStream.bufferedReader().readText()
-            val error = proc.errorStream.bufferedReader().readText()
-            val exit = proc.waitFor()
-            if (output.isNotEmpty()) println("[UserSU:kernel] $output")
-            if (error.isNotEmpty()) System.err.println("[UserSU:kernel:err] $error")
-            exit
+            kernel.bypassSELinux()
+            kernel.getRoot()
+            kernel.boot("init=/system/bin/sh root=/data ro -s")
         } catch (e: Exception) {
-            e.printStackTrace()
+            System.err.println("[UserSU:kernel] Native kernel boot failed: ${e.message}")
             -1
         }
     }
 
-    // ── Branch management ────────────────────────────────────────
     override fun createBranch(branchName: String?) {
         if (branchName.isNullOrEmpty()) return
         val newBranchDir = File(branchesDir, branchName)
@@ -252,7 +262,6 @@ class UserSUServer : IUserSU.Stub() {
         } catch (_: Exception) {}
     }
 
-    // ── App wrapping ─────────────────────────────────────────────
     override fun setAppWrapped(packageName: String?, wrapped: Boolean) {
         if (packageName.isNullOrEmpty()) return
         val propName = "wrap.$packageName"
@@ -274,7 +283,6 @@ class UserSUServer : IUserSU.Stub() {
         } catch (_: Exception) { false }
     }
 
-    // ── Private helpers ──────────────────────────────────────────
     private fun setupBranchFS(branchDir: File) {
         val dirs = listOf("bin", "sbin", "etc", "root", "home", "tmp", "usr/bin", "usr/sbin", "usr/lib", "var")
         for (dir in dirs) File(branchDir, dir).mkdirs()
@@ -328,6 +336,41 @@ class UserSUServer : IUserSU.Stub() {
     companion object {
         @JvmStatic
         fun main(args: Array<String>) {
+            val kernelArgs = mutableListOf<String>()
+            val serverArgs = mutableListOf<String>()
+            var kernelMode = false
+
+            var i = 0
+            while (i < args.size) {
+                when (args[i]) {
+                    "--kernel", "-k" -> {
+                        kernelMode = true
+                        i++
+                        while (i < args.size) {
+                            kernelArgs.add(args[i])
+                            i++
+                        }
+                        break
+                    }
+                    else -> {
+                        serverArgs.add(args[i])
+                        i++
+                    }
+                }
+            }
+
+            if (kernelMode) {
+                val cmdline = kernelArgs.joinToString(" ")
+                println("[UserSU] Booting Usermode Kernel with cmdline: $cmdline")
+                val kernel = dev.github.thepanoc95.usersu.backend.UsermodeKernel
+                val exitCode = kernel.boot(cmdline)
+                if (exitCode != 0) {
+                    System.err.println("[UserSU] Kernel boot failed with code $exitCode")
+                }
+                Runtime.getRuntime().halt(if (exitCode < 0) 1 else exitCode)
+                return
+            }
+
             Looper.prepareMainLooper()
             val server = UserSUServer()
             println("[UserSU] Server daemon v${server.getVersion()} started, registering binder...")
@@ -347,8 +390,6 @@ class UserSUServer : IUserSU.Stub() {
                 )
             }
 
-            // Manual Binder implementation of android.app.IServiceConnection
-            // (avoids AIDL compilation issues on different SDK/arch combos)
             val connection = object : Binder() {
                 init {
                     attachInterface(IInterface { this }, "android.app.IServiceConnection")

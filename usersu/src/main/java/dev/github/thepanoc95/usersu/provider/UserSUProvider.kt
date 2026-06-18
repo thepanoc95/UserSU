@@ -13,15 +13,13 @@ class UserSUProvider : ContentProvider() {
     override fun call(method: String, arg: String?, extras: Bundle?): Bundle? {
         if (method == "getBinder") {
             val callingPkg = callingPackage ?: return null
-            
-            // Check authorization in SharedPreferences
+
             val context = context ?: return null
             val prefs = context.getSharedPreferences("usersu_prefs", android.content.Context.MODE_PRIVATE)
             val isAuthorized = prefs.getBoolean("authorized_$callingPkg", false)
             
             val result = Bundle()
             if (!isAuthorized) {
-                // If not authorized, save request so user can approve in the manager UI
                 prefs.edit().putBoolean("requested_$callingPkg", true).apply()
                 result.putBoolean("authorized", false)
                 return result

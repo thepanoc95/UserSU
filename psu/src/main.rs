@@ -14,17 +14,11 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Create a new branch
     Create { name: String },
-    /// Switch to a branch
     Switch { name: String },
-    /// Delete a branch
     Delete { name: String },
-    /// List all branches
     List,
-    /// Rollback changes in active branch
     Rollback,
-    /// Show status of modified files in active branch
     Status,
 }
 
@@ -34,7 +28,6 @@ fn main() {
     let branches_dir = base_dir.join("branches");
     let active_link = base_dir.join("active");
 
-    // Ensure directory structure
     fs::create_dir_all(&branches_dir).unwrap();
     let main_branch = branches_dir.join("main");
     if !main_branch.exists() {
@@ -65,7 +58,6 @@ fn main() {
             status_branch(&active_link);
         }
         None => {
-            // Enter interactive shell
             enter_shell(&active_link);
         }
     }
@@ -79,7 +71,7 @@ fn setup_branch_fs(branch_dir: &Path) {
     for dir in subdirs {
         fs::create_dir_all(branch_dir.join(dir)).unwrap();
     }
-    // Populate guest bin with symlinks to system bin
+
     let sys_bin = Path::new("/system/bin");
     let guest_bin = branch_dir.join("bin");
     if let Ok(entries) = fs::read_dir(sys_bin) {
@@ -91,7 +83,7 @@ fn setup_branch_fs(branch_dir: &Path) {
             }
         }
     }
-    // Try to init git
+
     let _ = Command::new("git").arg("init").current_dir(branch_dir).status();
     let _ = Command::new("git").args(&["add", "."]).current_dir(branch_dir).status();
     let _ = Command::new("git").args(&["commit", "-m", "Initial rootFS template"]).current_dir(branch_dir).status();
@@ -104,12 +96,10 @@ fn create_branch(branches_dir: &Path, active_link: &Path, name: &str) {
         return;
     }
     fs::create_dir_all(&new_branch).unwrap();
-    
-    // Copy active branch template/files
+
     let active_dir = active_link.canonicalize().unwrap();
     copy_dir_recursive(&active_dir, &new_branch);
 
-    // Init git and commit
     let _ = Command::new("git").arg("init").current_dir(&new_branch).status();
     let _ = Command::new("git").args(&["add", "."]).current_dir(&new_branch).status();
     let _ = Command::new("git").args(&["commit", "-m", &format!("Branch created from {:?}", active_dir.file_name().unwrap())]).current_dir(&new_branch).status();

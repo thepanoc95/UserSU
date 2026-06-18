@@ -11,6 +11,9 @@ android {
 
     defaultConfig {
         minSdk = 24
+        ndk {
+            abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64", "x86")
+        }
     }
 
     compileOptions {
@@ -25,13 +28,20 @@ android {
     buildFeatures {
         aidl = true
     }
+
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.22.1"
+        }
+    }
+
+    ndkVersion = "26.1.10909125"
 }
 
 dependencies {
     compileOnly("androidx.annotation:annotation:1.7.1")
 }
-
-// Task to run d8 tool and generate DEX for app_process
 
 tasks.register("dexJar") {
     dependsOn("assembleRelease")

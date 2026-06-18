@@ -44,13 +44,9 @@ object SuClient {
 
         val daemon = IUserSU.Stub.asInterface(binder)
 
-        // ── Parse arguments ──────────────────────────────────────
-        // su [--startkernel | -c <command> | --shell]
-
         val startKernelFlag = args.any { it == "--startkernel" || it == "-k" }
 
         if (startKernelFlag) {
-            // Custom su: run startkernel.sh from the app directory
             val kernelScript = File("/data/data/$APP_PKG/files/bin/startkernel.sh")
             if (!kernelScript.exists()) {
                 System.err.println("Error: startkernel.sh not found at ${kernelScript.absolutePath}")
@@ -78,7 +74,6 @@ object SuClient {
             return
         }
 
-        // ── Normal su behavior ──────────────────────────────────
         val cmdList = mutableListOf<String>()
         var i = 0
         var useShell = false
@@ -103,7 +98,6 @@ object SuClient {
         }
 
         if (useShell || cmdList.isEmpty()) {
-            // Interactive shell
             val stdinFd = ParcelFileDescriptor.dup(FileDescriptor.`in`)
             val stdoutFd = ParcelFileDescriptor.dup(FileDescriptor.out)
             val stderrFd = ParcelFileDescriptor.dup(FileDescriptor.err)
@@ -120,7 +114,6 @@ object SuClient {
             return
         }
 
-        // Single command execution
         val stdinFd = ParcelFileDescriptor.dup(FileDescriptor.`in`)
         val stdoutFd = ParcelFileDescriptor.dup(FileDescriptor.out)
         val stderrFd = ParcelFileDescriptor.dup(FileDescriptor.err)

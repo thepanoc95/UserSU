@@ -17,3 +17,8 @@ import dev.github.thepanoc95.usersu.service.UserSUDaemonService
 class MainActivity : Activity() {
     
 }
+
+/** 
+ * If going to merge this file, overwrite this file cuz its just a placeholder.
+ *  -- thepanoc95
+ * **/
