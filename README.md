@@ -14,6 +14,6 @@ Unlicense - public domain. Do whatever you want with it, no attribution needed (
 
 ---
 
-Also this is still kinda experimental so bugs are expected. Report them and I'll try to fix them when I have time.
+Also this is still kinda experimental so bugs are expected. Report them and We'll try to fix them when its possible.
 >[!NOTE]
 >This thing is not even functional yet.
