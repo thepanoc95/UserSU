@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A shell prompt chevron and caret, in the app's amber accent. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#D9A114"
+        android:pathData="M38,42 L48,54 L38,66 L43,70 L56,54 L43,38 Z" />
+    <path
+        android:fillColor="#D9A114"
+        android:pathData="M58,62 L72,62 L72,68 L58,68 Z" />
+</vector>

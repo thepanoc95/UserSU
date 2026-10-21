@@ -24,17 +24,15 @@ jobs:
             arch: x86
           - target: x86_64-linux-android
             arch: x86_64
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
       - name: Setup Rust
-        uses: actions-rs/toolchain@v1
+        uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: stable
-          target: ${{ matrix.target }}
-          override: true
+          targets: ${{ matrix.target }}
 
       - name: Setup Android NDK
         uses: nttld/setup-ndk@v1
@@ -43,83 +41,57 @@ jobs:
           ndk-version: r25c
           add-to-path: true
 
-      - name: Cache cargo registry
-        uses: actions/cache@v3
-        with:
-          path: ~/.cargo/registry
-          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+      - name: Install FUSE headers
+        # usud links libfuse; the NDK provides the sysroot headers itself, but
+        # the host build of any build script needs pkg-config.
+        run: sudo apt-get update && sudo apt-get install -y pkg-config
 
-      - name: Cache cargo index
-        uses: actions/cache@v3
-        with:
-          path: ~/.cargo/git
-          key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
-
-      - name: Cache target directory
-        uses: actions/cache@v3
-        with:
-          path: target
-          key: ${{ runner.os }}-target-${{ matrix.target }}-${{ hashFiles('**/Cargo.lock') }}
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
 
       - name: Install cargo-ndk
         run: cargo install cargo-ndk
 
-      - name: Build minsuki
+      - name: Build usud and usud-init
         env:
           ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
         run: |
-          cargo ndk -t ${{ matrix.arch }} build --release --bin minsuki
-
-      - name: Build envspoof
-        env:
-          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
-        run: |
-          cargo ndk -t ${{ matrix.arch }} build --release --bin envspoof
-
-      - name: Build library
-        env:
-          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
-        run: |
-          cargo ndk -t ${{ matrix.arch }} build --release --lib
+          cargo ndk -t ${{ matrix.arch }} build --release --bin usud --bin usud-init
 
       - name: Package binaries
         run: |
+          set -eu
           mkdir -p dist/${{ matrix.arch }}
-          cp target/${{ matrix.target }}/release/minsuki dist/${{ matrix.arch }}/
-          cp target/${{ matrix.target }}/release/envspoof dist/${{ matrix.arch }}/
-          cp target/${{ matrix.target }}/release/libminsuki.so dist/${{ matrix.arch }}/
-          
-          # Strip binaries to reduce size
-          $ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip dist/${{ matrix.arch }}/*
-          
-          # Create tarball
+          cp target/${{ matrix.target }}/release/usud dist/${{ matrix.arch }}/
+          cp target/${{ matrix.target }}/release/usud-init dist/${{ matrix.arch }}/
+          # The documented su entry point is a symlink to usud, not a copy.
+          ln -sf usud dist/${{ matrix.arch }}/su
+
+          $ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip \
+            dist/${{ matrix.arch }}/usud dist/${{ matrix.arch }}/usud-init
+
           cd dist
-          tar -czf minsuki-${{ matrix.arch }}.tar.gz ${{ matrix.arch }}/
+          tar -czhf usersu-${{ matrix.arch }}.tar.gz ${{ matrix.arch }}/
           cd ..
 
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v3
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
         with:
-          name: minsuki-${{ matrix.arch }}
-          path: dist/minsuki-${{ matrix.arch }}.tar.gz
+          name: usersu-${{ matrix.arch }}
+          path: dist/usersu-${{ matrix.arch }}.tar.gz
 
   create-release:
     name: Create Release
     needs: build-android
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
-    
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Download all artifacts
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           path: artifacts
-
-      - name: Display structure of downloaded files
-        run: ls -R artifacts
 
       - name: Create checksums
         run: |
@@ -129,65 +101,50 @@ jobs:
             sha256sum *.tar.gz > checksums.txt
             cd ..
           done
-          cd ..
 
       - name: Generate release notes
-        id: release_notes
         run: |
           cat > release_notes.md << 'EOF'
-          ## MinSuki Release ${{ github.ref_name }}
-          
-          A minimal SuperUser emulation layer for Android.
-          
-          ### Binaries Included
-          - `minsuki` - Main SuperUser emulation binary
-          - `envspoof` - Environment spoofer tool
-          - `libminsuki.so` - MinSuki library
-          
-          ### Supported Architectures
-          - **arm64-v8a** (aarch64) - Modern 64-bit ARM devices
-          - **armeabi-v7a** (armv7) - 32-bit ARM devices
-          - **x86_64** - 64-bit x86 emulators/devices
-          - **x86** - 32-bit x86 emulators/devices
-          
+          ## UserSU Release ${{ github.ref_name }}
+
+          A userspace root environment for Android.
+
+          ### Binaries included
+          - `usud` — the backend daemon and `su`
+          - `usud-init` — the sandboxed PID 1
+          - `su` — a symlink to `usud`
+
+          ### Supported architectures
+          - arm64-v8a (aarch64)
+          - armeabi-v7a (armv7)
+          - x86_64
+          - x86
+
           ### Installation
-          
-          1. Download the appropriate archive for your device architecture
-          2. Extract the archive: `tar -xzf minsuki-<arch>.tar.gz`
-          3. Push to device: `adb push <arch>/minsuki /data/local/tmp/`
-          4. Make executable: `adb shell chmod +x /data/local/tmp/minsuki`
-          5. Run: `adb shell /data/local/tmp/minsuki`
-          
+          1. Download the archive for your device architecture
+          2. Extract: `tar -xzf usersu-<arch>.tar.gz`
+          3. Push: `adb push <arch>/usud /data/local/tmp/`
+          4. Run: `adb shell /data/local/tmp/usud install`
+
           ### Verification
-          
-          Check the `checksums.txt` file in each artifact to verify integrity:
-          ```bash
+          ```sh
           sha256sum -c checksums.txt
           ```
-          
-          ### Notes
-          - All binaries are stripped for minimal size
-          - Built with Rust stable toolchain
-          - Android NDK r25c
-          
-          **Author:** Milo/OakyMac
           EOF
-          
-          echo "notes_file=release_notes.md" >> $GITHUB_OUTPUT
 
-      - name: Create Release
+      - name: Create release
         uses: softprops/action-gh-release@v1
         with:
-          body_path: ${{ steps.release_notes.outputs.notes_file }}
+          body_path: release_notes.md
           files: |
-            artifacts/minsuki-arm64-v8a/minsuki-arm64-v8a.tar.gz
-            artifacts/minsuki-arm64-v8a/checksums.txt
-            artifacts/minsuki-armeabi-v7a/minsuki-armeabi-v7a.tar.gz
-            artifacts/minsuki-armeabi-v7a/checksums.txt
-            artifacts/minsuki-x86_64/minsuki-x86_64.tar.gz
-            artifacts/minsuki-x86_64/checksums.txt
-            artifacts/minsuki-x86/minsuki-x86.tar.gz
-            artifacts/minsuki-x86/checksums.txt
+            artifacts/usersu-arm64-v8a/usersu-arm64-v8a.tar.gz
+            artifacts/usersu-arm64-v8a/checksums.txt
+            artifacts/usersu-armeabi-v7a/usersu-armeabi-v7a.tar.gz
+            artifacts/usersu-armeabi-v7a/checksums.txt
+            artifacts/usersu-x86_64/usersu-x86_64.tar.gz
+            artifacts/usersu-x86_64/checksums.txt
+            artifacts/usersu-x86/usersu-x86.tar.gz
+            artifacts/usersu-x86/checksums.txt
           draft: false
           prerelease: false
         env:
@@ -196,23 +153,16 @@ jobs:
   build-info:
     name: Build Information
     runs-on: ubuntu-latest
-    
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-      
+      - uses: actions/checkout@v4
       - name: Generate build info
         run: |
-          echo "### Build Information" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "- **Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Ref:** ${{ github.ref }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Author:** ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Rust Version:** stable" >> $GITHUB_STEP_SUMMARY
-          echo "- **NDK Version:** r25c" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Architectures" >> $GITHUB_STEP_SUMMARY
-          echo "- arm64-v8a (aarch64-linux-android)" >> $GITHUB_STEP_SUMMARY
-          echo "- armeabi-v7a (armv7-linux-androideabi)" >> $GITHUB_STEP_SUMMARY
-          echo "- x86_64 (x86_64-linux-android)" >> $GITHUB_STEP_SUMMARY
-          echo "- x86 (i686-linux-android)" >> $GITHUB_STEP_SUMMARY
+          {
+            echo "### Build Information"
+            echo ""
+            echo "- **Commit:** ${{ github.sha }}"
+            echo "- **Ref:** ${{ github.ref }}"
+            echo "- **Author:** ${{ github.actor }}"
+            echo "- **Rust Version:** stable"
+            echo "- **NDK Version:** r25c"
+          } >> $GITHUB_STEP_SUMMARY

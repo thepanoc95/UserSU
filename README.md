@@ -1,184 +1,171 @@
-# SpoofySu
+# UserSU
 
-<img width="100" height="100" alt="SpoofySu Logo" src="./usersu_logo.png" />
+<img width="100" height="100" alt="UserSU Logo" src="./usersu_logo.png" />
 
-A userland root environment spoofer for Android devices written in Rust.
+A userspace root environment for Android, written in Rust.
 
-[![License: Unlicense](https://img.shields.io/badge/license-Unlicense-blue.svg)](http://unlicense.org/)
+[![License: Unlicense](https://img.shields.io/badge/License-Unlicense-blue.svg)](http://unlicense.org/)
 [![Made with Rust](https://img.shields.io/badge/Made%20with-Rust-orange.svg)](https://www.rust-lang.org/)
 
-## What is this?
+## What this is
 
-So basically I got tired of all the hassle with unlocking bootloaders, flashing boot images, and risking bricking my devices just to get root access. SpoofySu is my solution - it's a userland root environment that tricks apps into thinking you have root without actually modifying anything on your device.
+UserSU gives an Android device a root-like environment without unlocking the
+bootloader or flashing a boot image. It combines three things:
 
-It's written in Rust because I wanted something fast and memory-safe, plus Rust on Android is pretty cool to work with.
+1. **A privilege broker.** A backend daemon, `usud`, decides which apps may run
+   commands as root, and by what means. It can delegate to a real root solution
+   that is already installed, attempt a kernel exploit, or fall back to running
+   everything unprivileged in a sandbox.
+2. **Layered root filesystems.** UserFS is an overlay: a writable upper layer
+   over one or more read-only lower layers, with whiteouts and copy-up. A
+   profile is one such stack, so a device can carry several isolated roots.
+3. **Sandboxes.** A command or an init system runs inside a user-mode Linux
+   kernel, a `pivot_root(2)`/`chroot(2)` jail, or a ptrace-based proot that
+   needs no privileges at all.
 
-## Features
+It is honest about what it can do. Every privileged operation probes for the
+capability it needs and reports why it failed. It never fabricates a successful
+escalation.
 
-- No bootloader unlock needed
-- No boot image flashing
-- Creates a fake root filesystem in `/sdcard/SpoofySu/`
-- Spoofs all the environment variables apps check for root
-- Interactive root shell with `psu` command
-- Execute commands as "root" with `psudo`
-- Works on any Android device (tested on my Pixel and Samsung)
-- Pretty terminal colors because why not
+## Layout
 
-## How does it work?
+| Path | Purpose | Needs root |
+| --- | --- | --- |
+| `/userfs` | UserFS root, a real mount point | yes |
+| `/data/me.usersu` | Upper and work directories; the daemon socket | yes |
+| `/user_system` | Optional read-write system layer | yes |
+| `/data/data/me.usersu/files/mnt/userfs` | FUSE fallback mount for UserFS | no |
 
-It's actually pretty simple. SpoofySu runs entirely in userspace and does three main things:
+When the device cannot create and mount `/userfs`, `usud` serves the exact same
+tree through FUSE under the app's files directory. The `su` entry point exists in
+both trees:
 
-1. **Spoofs your environment variables** - Changes USER to "root", UID to 0, HOME to our fake root directory, etc.
-2. **Creates a mini Unix filesystem** - Sets up `/sdcard/SpoofySu/` with all the standard directories like `/bin`, `/etc`, `/root`, etc.
-3. **Manipulates your PATH** - Puts our fake filesystem first so commands find our stuff before the real system
+```
+/userfs/system/bin/su
+/data/data/me.usersu/files/mnt/userfs/system/bin/su
+```
 
-The cool part is everything is sandboxed. When you "modify" system files, you're actually just editing files in `/sdcard/SpoofySu/`. Your actual system stays completely untouched.
+Both are symlinks to `usud`, which selects `su` mode either from that symlink
+name or from the `-root.me` argument.
+
+## The components
+
+| Crate / module | Role |
+| --- | --- |
+| `usersu-core` | Paths, configuration, the layer stack, privilege providers, sandbox selection, proot, `su` policy, and the wire protocol |
+| `usud` | The backend daemon: `su`, the FUSE UserFS, the IPC server, and the sandbox executors |
+| `usud-init` | A minimal PID 1 for a sandboxed init system |
+| `manager/` | The Android manager app, Jetpack Compose |
+
+## How usud is invoked
+
+```
+usud <subcommand>      # CLI: daemon, status, providers, shell, exec, install, ...
+usud -root.me [args]   # su
+usud su [args]         # the same thing, spelled explicitly
+su -> usud             # a symlink; usud detects its argv[0]
+```
+
+Common commands:
+
+```sh
+usud daemon            # run the backend in the foreground
+usud status            # daemon and device status
+usud providers         # which privilege providers are usable, and why
+usud install           # write usud and the su entry point into UserFS
+usud shell             # a root shell inside UserFS
+usud exec -- id         # run one command
+usud boot              # start the sandboxed init system
+usud profile list      # list profiles
+usud stop              # stop the daemon
+```
 
 ## Building
 
-You'll need Rust and the Android NDK. I usually build on my laptop but you can also build directly on your phone with Termux which is neat.
+The backend builds for the host, which is what the tests use:
 
-```bash
-# Clone it
-git clone https://github.com/oakymacintosh/spoofysu
-cd spoofysu
-
-# Build for Android
-cargo ndk -t arm64-v8a build --release
-
-# Or if you're in Termux on your phone
-pkg install rust
-cargo build --release
+```sh
+cargo build --workspace
+cargo test --workspace
 ```
 
-## Installation
+For Android, use the NDK, for example:
 
-```bash
-# Push to your device
-adb push target/aarch64-linux-android/release/envspoof /data/local/tmp/
-adb shell chmod +x /data/local/tmp/envspoof
-
-# Or in Termux just copy it
-cp target/release/envspoof $PREFIX/bin/
-
-# Install the aliases (this adds psu and psudo to your shell)
-envspoof install
-source ~/.bashrc
+```sh
+cargo ndk -t arm64-v8a build --release --bin usud --bin usud-init
 ```
 
-## Usage
+The manager app needs the Android SDK and Gradle:
 
-```bash
-# Check if everything is working
-envspoof status
-
-# Enter a root shell
-psu
-
-# Or run a single command
-psudo whoami
+```sh
+cd manager && gradle :app:assembleDebug
 ```
 
-Here's what it looks like when you use it:
+The workspace also uses a `justfile`: `just test`, `just check`, `just android`,
+`just manager`.
 
-```bash
-$ psu
-[*] Userland root environment active
-[!] boot.img not modified.
+## Filesystem backends
 
-root@android:~# whoami
-root
-root@android:~# pwd
-/sdcard/SpoofySu/root
-root@android:~# exit
-```
+`userfs_backend` selects how UserFS is served:
 
-## The fake filesystem
+* `auto` picks overlayfs when root is available and FUSE otherwise;
+* `overlayfs` mounts `/userfs`, `/data/me.usersu` and `/user_system` via the
+  overlayfs metamodule, and refuses to pretend when it cannot;
+* `fuse` always serves the tree through FUSE.
 
-First time you run it, SpoofySu creates this structure in `/sdcard/SpoofySu/`:
+## Sandbox backends
 
-```
-SpoofySu/
-├── bin/          <- your "root" executables
-├── sbin/         <- system binaries
-├── etc/          <- config files (passwd, group, hosts, etc)
-├── root/         <- root's home directory
-├── home/         <- user home directories
-├── tmp/          <- temp files
-├── usr/          <- user programs
-│   ├── bin/
-│   ├── sbin/
-│   └── lib/
-└── var/          <- variable data
-```
+`sandbox_backend` selects how a command or init system runs:
 
-You can add your own scripts to `bin/`, edit config files in `etc/`, basically treat it like a real root filesystem.
+* `um` boots a user-mode Linux kernel (`linux-um-aarch64` on arm64, UML on
+  amd64) with UserFS as its root via hostfs;
+* `pivot_root` bind-mounts UserFS and pivots into it;
+* `chroot` chroots into UserFS with the pseudo-filesystems mounted;
+* `proot` rewrites paths with `ptrace` and needs no privileges;
+* `auto` chooses the strongest backend the device supports.
 
-## What works and what doesn't
+## Privilege providers
 
-**Works:**
-- Apps that check environment variables for root
-- Running shell scripts that expect root
-- Modifying "system" files (they go to our sandbox)
-- Learning about how root detection works
-- Testing apps in a root-like environment
+`privilege_mode` and `privilege_order` control acquisition. Providers are probed
+in order:
 
-**Doesn't work:**
-- Apps with kernel-level root checks (SafetyNet, banking apps, etc)
-- Anything that needs actual kernel privileges
-- Modifying the real system partition (by design!)
-- Magisk modules (though I'm working on compatibility)
+* `existing-root` uses the daemon's own root if it has it;
+* `magisk`, `kernelsu`, `apatch` delegate to a root solution already installed;
+* `kernel-exploit` attempts a kernel exploit.
 
-This isn't a replacement for actual root. It's more like a development/testing tool or for apps that only do basic root checks.
+`privilege_mode = "none"` disables all of it and runs everything in the FUSE
+sandbox.
 
-## TODO
+## Configuration
 
-I'm still working on this project. Here's what I want to add:
+`usud` reads `usersu.toml` from the data directory. It carries the backend
+choices, the sandbox and init commands, the profile list, and the `allowed_uids`
+and `denied_uids` access lists. `usud status` and the manager app's Settings tab
+show the running values.
 
-- [ ] A proper GUI app instead of just CLI
-- [ ] Better su binary emulation
-- [ ] App-specific environment spoofing
-- [ ] Maybe some basic Magisk compatibility
-- [ ] More bypass techniques for root detection
+The manager app speaks the same framed protocol as the CLI, in JSON rather than
+bincode, over the daemon socket.
 
-## Why did I make this?
+## The protocol
 
-Mostly for fun and learning Rust better. But also because I have a work phone I can't unlock the bootloader on, and I wanted to test some root apps. This seemed like a good middle ground.
+Every message is a 4-byte little-endian length followed by a payload. `usud`
+accepts bincode (the CLI and `su`) and JSON (the manager app) and pins the
+encoding of a connection at the handshake. Responses are tagged JSON documents,
+so a client can parse them without a bincode implementation.
 
-It's also useful if you're developing Android apps and want to test root detection without constantly switching between rooted/unrooted devices.
+## Status
 
-## Integration with other tools
-
-Works pretty well with:
-- **Shizuku** - Can enhance the fake root environment
-- **Termux** - Great combo for a full Linux-like experience
-- **ADB** - Obviously lol
-
-## Contributing
-
-If you want to contribute, cool! Just open a PR. I'm not super strict about code style or anything, just make sure it compiles and doesn't break existing stuff.
-
-Bug reports and feature requests are welcome too.
-
-## Community
-
-I set up a Telegram group for this and the OpenRoot project:
-[Join here](https://t.me/usersu_root)
-
-Feel free to ask questions or share what you're using it for!
-
-## Credits
-
-This project is inspired by the [OpenRoot](https://github.com/oakymacintosh/openroot) root-emulation approach I worked on before.
-
-Built with: Rust, Clap, Colorize, Tokio
+This is a from-scratch rewrite and is under active development. The core, the
+daemon, the FUSE backend, proot, and the init system are implemented and tested
+on the host; the manager app is written to spec but has not been built here,
+because the Android SDK is not available in this environment.
 
 ## License
 
-Unlicense - public domain. Do whatever you want with it, no attribution needed (but appreciated).
+Unlicense - public domain. Do whatever you want with it, no attribution needed
+(but appreciated).
 
 ---
 
-**Heads up:** This is for educational/development purposes. Don't use it to bypass security on apps where you shouldn't have root access. Be responsible.
-
-Also this is still kinda experimental so bugs are expected. Report them and I'll try to fix them when I have time.
+**Heads up:** This is for educational and development purposes. Don't use it to
+bypass security on apps where you shouldn't have root access. Be responsible.

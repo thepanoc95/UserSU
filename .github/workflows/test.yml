@@ -1,0 +1,44 @@
+name: Test
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    name: Build and test the workspace
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Install FUSE headers
+        # usud links libfuse to serve the UserFS fallback.  The tests do not
+        # mount anything, so only the development headers are needed.
+        run: sudo apt-get update && sudo apt-get install -y libfuse3-dev pkg-config
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Format
+        run: cargo fmt --all --check
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Build
+        run: cargo build --workspace --all-targets
+
+      - name: Test
+        # A clean environment: the tests must not depend on the developer's
+        # USERSU_DATA_DIR or USERSU_SOCKET leaking in from CI.
+        run: env -u USERSU_DATA_DIR -u USERSU_SOCKET cargo test --workspace
