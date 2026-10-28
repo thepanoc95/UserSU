@@ -1,5 +1,5 @@
 {
-  description = "SpoofySU flake";
+  description = "UserSU flake";
 
   inputs = {
     nixpkgs.url = "github:nixos/nixpkgs?ref=nixos-unstable";
@@ -11,11 +11,12 @@
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = import nixpkgs { inherit system; };
-        
+
         # Android SDK with NDK
         android-sdk = android-nixpkgs.sdk.${system} (sdkPkgs: with sdkPkgs; [
           cmdline-tools-latest
           build-tools-34-0-0
+          build-tools-35-0-0
           platform-tools
           platforms-android-34
           ndk-26-1-10909125
@@ -42,8 +43,9 @@
             gradle
             openjdk17
             android-sdk
-	    flutter
-	    jdk17
+            kotlin
+            jdk17
+            dart
           ] ++ crossCompilers;
 
           shellHook = ''
@@ -51,24 +53,39 @@
             echo "Available cross-compilers:"
             echo "  - aarch64-linux-gnu-gcc"
             echo "  - armv7l-linux-gnu-gcc"
-            echo "  - riscv64-linux-gnu-gcc"
+#            echo "  - riscv64-linux-gnu-gcc"
             echo ""
             echo "Android NDK available at: $ANDROID_HOME/ndk/*"
             echo ""
-            
+
             export CC=gcc
             export CXX=g++
             export JAVA_HOME=${pkgs.openjdk17}
             export PATH=$JAVA_HOME/bin:$PATH
             export GRADLE_OPTS="-Dorg.gradle.daemon=false"
-            
-            # Android environment
-            export ANDROID_HOME="${android-sdk}/share/android-sdk"
+
+            # Create writable SDK overlay so Gradle can install missing packages
+            export _NIX_SDK="${android-sdk}/share/android-sdk"
+            export ANDROID_HOME="$HOME/.android/sdk"
             export ANDROID_SDK_ROOT="$ANDROID_HOME"
-            
+            if [ ! -d "$ANDROID_HOME" ]; then
+              mkdir -p "$ANDROID_HOME"
+              for _dir in platforms platform-tools licenses ndk cmdline-tools build-tools; do
+                if [ -d "$_NIX_SDK/$_dir" ]; then
+                  cp -r "$_NIX_SDK/$_dir" "$ANDROID_HOME/"
+                  chmod -R u+w "$ANDROID_HOME/$_dir"
+                fi
+              done
+              if [ -f "$_NIX_SDK/.knownPackages" ]; then
+                cp "$_NIX_SDK/.knownPackages" "$ANDROID_HOME/"
+                chmod u+w "$ANDROID_HOME/.knownPackages"
+              fi
+              echo "✓ Writable SDK overlay created at $ANDROID_HOME"
+            fi
+
             # Find NDK directory
             export ANDROID_NDK_ROOT="$ANDROID_HOME/ndk/26.1.10909125"
-            
+
             # Add NDK toolchain to PATH
             if [ -d "$ANDROID_NDK_ROOT" ]; then
               export PATH="$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH"
@@ -76,7 +93,7 @@
             else
               echo "⚠ Android NDK not found at $ANDROID_NDK_ROOT"
             fi
-            
+
             # Cargo configuration for Android
             mkdir -p .cargo
             cat > .cargo/config.toml << 'EOF'
@@ -97,7 +114,7 @@ linker = "x86_64-linux-android21-clang"
 ar = "llvm-ar"
 EOF
             echo "✓ Created .cargo/config.toml for Android cross-compilation"
-            
+
             gradle2nix() {
               nix run github:tadfisher/gradle2nix -- "$@"
             }

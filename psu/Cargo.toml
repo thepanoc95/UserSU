@@ -1,0 +1,18 @@
+[package]
+name = "psu"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "psu"
+path = "src/main.rs"
+
+[[bin]]
+name = "psudo"
+path = "psudo/main.rs"
+
+[dependencies]
+android = "0.0.1"
+cc = "1.2.62"
+clap = { version = "4.6.1", features = ["derive"] }
+nix = "0.31.3"

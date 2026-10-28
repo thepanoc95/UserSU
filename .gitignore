@@ -360,3 +360,13 @@ target/
 
 su
 libfakeroot.so
+
+# Dart
+dart/.dart_tool/
+dart/.packages
+dart/.pub/
+dart/build/
+dart/pubspec.lock
+dart/coverage/
+
+*KEYSTORE
