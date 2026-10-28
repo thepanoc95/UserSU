@@ -1,0 +1,18 @@
+[package]
+name = "usud-init"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "UserSU sandboxed init: a minimal PID 1 for a UserFS sandbox"
+
+[[bin]]
+name = "usud-init"
+path = "src/main.rs"
+
+[dependencies]
+usersu-core.workspace = true
+libc.workspace = true
+log.workspace = true
+nix.workspace = true

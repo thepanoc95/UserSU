@@ -1,16 +1,17 @@
 # UserSU
 
-<img width="100" height="100" alt="SpoofySu Logo" src="./usersu_logo.png" />
+<img width="100" height="100" alt="UserSU Logo" src="./usersu_logo.png" />
 
 UserMode root solution for Android devices
 
-[![License: Unlicense](https://img.shields.io/badge/license-Unlicense-blue.svg)](http://unlicense.org/)
+[![License: Unlicense](https://img.shields.io/badge/License-Unlicense-blue.svg)](http://unlicense.org/)
 [![Made with Rust](https://img.shields.io/badge/Made%20with-Rust-orange.svg)](https://www.rust-lang.org/)
 
 
 ## License
 
-Unlicense - public domain. Do whatever you want with it, no attribution needed (but appreciated).
+Unlicense - public domain. Do whatever you want with it, no attribution needed
+(but appreciated).
 
 ---
 

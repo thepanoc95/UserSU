@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">UserSU</string>
+    <string name="nav_home">Home</string>
+    <string name="nav_superuser">Superuser</string>
+    <string name="nav_userfs">UserFS</string>
+    <string name="nav_settings">Settings</string>
+</resources>

@@ -1,0 +1,27 @@
+[package]
+name = "usud"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "UserSU daemon: su, UserFS, sandboxes and the overlayfs metamodule"
+
+[[bin]]
+name = "usud"
+path = "src/main.rs"
+
+[dependencies]
+usersu-core.workspace = true
+anyhow.workspace = true
+clap.workspace = true
+env_logger.workspace = true
+fuser.workspace = true
+libc.workspace = true
+log.workspace = true
+nix.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+tempfile = "3.10"
